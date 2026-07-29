@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Turtle Heart Spokes Preview</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #000;
+    height: 100%;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    margin: 0 auto;
+    background: #000;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<script>
+// Recreates the exact behavior of the provided turtle script:
+// - pen jumps to (0, 40) each iteration
+// - draws a straight line out to the heart point
+// - draws an 8-point starburst there (rotating RIGHT 45 each time)
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+const colors = ["red", "blue", "lime", "yellow", "cyan", "magenta", "orange", "pink"];
+
+let turtle = { x: 0, y: 0, heading: 0 };
+
+function toScreen(x, y) {
+  return {
+    sx: canvas.width / 2 + x,
+    sy: canvas.height / 2 - y
+  };
+}
+
+function moveTo(nx, ny, draw) {
+  if (draw) {
+    const p1 = toScreen(turtle.x, turtle.y);
+    const p2 = toScreen(nx, ny);
+    ctx.beginPath();
+    ctx.moveTo(p1.sx, p1.sy);
+    ctx.lineTo(p2.sx, p2.sy);
+    ctx.stroke();
+  }
+  turtle.x = nx;
+  turtle.y = ny;
+}
+
+function forward(distance, draw) {
+  const rad = turtle.heading * Math.PI / 180;
+  const nx = turtle.x + distance * Math.cos(rad);
+  const ny = turtle.y + distance * Math.sin(rad);
+  moveTo(nx, ny, draw);
+}
+
+function draw() {
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.lineWidth = 1;
+
+  for (let i = 0; i < 120; i++) {
+    // penup + goto(0, 40)
+    turtle.x = 0;
+    turtle.y = 40;
+    turtle.heading = 0;
+
+    const angle = i * (Math.PI * 2) / 120;
+    const x = 16 * Math.pow(Math.sin(angle), 3) * 15;
+    const y = (
+      13 * Math.cos(angle)
+      - 5 * Math.cos(2 * angle)
+      - 2 * Math.cos(3 * angle)
+      - Math.cos(4 * angle)
+    ) * 15;
+
+    const c = colors[Math.floor(Math.random() * colors.length)];
+    ctx.strokeStyle = c;
+
+    // pendown, goto(x, y) -- draws the spoke line
+    // heading needs to point from (0,40) toward (x,y) for consistency,
+    // but since goto() in turtle draws a straight line regardless of heading,
+    // and turtle.setheading isn't called, turtle's heading stays whatever it
+    // was after the last starburst loop (right turns). We replicate goto()
+    // as a direct line (draw=true) without needing heading.
+    moveTo(x, y, true);
+
+    // 8-point starburst: forward, backward, turn RIGHT 45, repeat
+    for (let j = 0; j < 8; j++) {
+      forward(6, true);
+      forward(-6, true);
+      turtle.heading -= 45; // turtle's right() decreases heading
+    }
+  }
+}
+
+draw();
+</script>
+</body>
+</html>
