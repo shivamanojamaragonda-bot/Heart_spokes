@@ -5,81 +5,153 @@
 <title>Heart Spokes — Website</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
+  :root { --control-bg: rgba(0,0,0,0.6); --control-fg: #fff; }
   html, body {
     margin: 0;
     padding: 0;
     background: #000;
     height: 100%;
     overflow: hidden;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial;
+    color: var(--control-fg);
   }
   canvas {
     display: block;
     margin: 0 auto;
     background: #000;
+    width: 100vw;
+    height: 100vh;
   }
+  .controls {
+    position: fixed;
+    left: 12px;
+    top: 12px;
+    background: var(--control-bg);
+    color: var(--control-fg);
+    padding: 8px 10px;
+    border-radius: 8px;
+    backdrop-filter: blur(4px);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    z-index: 1000;
+  }
+  .controls label { font-size: 13px; }
+  .controls input[type="range"] { width: 110px; }
+  .small { font-size: 12px; opacity: 0.9; }
+  .credit {
+    position: fixed; right: 12px; bottom: 12px; color: rgba(255,255,255,0.6); font-size:12px;
+  }
+  button, select { background: transparent; color: var(--control-fg); border: 1px solid rgba(255,255,255,0.12); padding: 6px 8px; border-radius:6px; cursor:pointer }
 </style>
 </head>
 <body>
 <canvas id="canvas"></canvas>
+<div class="controls" aria-hidden="false">
+  <button id="toggle">Pause</button>
+  <label class="small">Speed <input id="speed" type="range" min="0" max="3" step="0.05" value="1"></label>
+  <label class="small">Star <input id="starLen" type="range" min="0" max="20" step="1" value="6"></label>
+  <select id="palette" title="Color palette">
+    <option value="default">Default</option>
+    <option value="warm">Warm</option>
+    <option value="cool">Cool</option>
+    <option value="mono">Monochrome</option>
+    <option value="random">Random</option>
+  </select>
+  <button id="reset">Reset</button>
+</div>
+<div class="credit">Heart Spokes — interactive</div>
 <script>
-// Recreates the exact behavior of the provided turtle script:
-// - pen jumps to (0, 40) each iteration
-// - draws a straight line out to the heart point
-// - draws an 8-point starburst there (rotating RIGHT 45 each time)
-
 const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { alpha: false });
 
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-resize();
-window.addEventListener('resize', resize);
+// Controls
+const toggleBtn = document.getElementById('toggle');
+const speedInput = document.getElementById('speed');
+const starLenInput = document.getElementById('starLen');
+const paletteSelect = document.getElementById('palette');
+const resetBtn = document.getElementById('reset');
 
-const colors = ["red", "blue", "lime", "yellow", "cyan", "magenta", "orange", "pink"];
+let running = true;
+let speed = parseFloat(speedInput.value);
+let starBase = parseFloat(starLenInput.value);
+let paletteName = paletteSelect.value;
 
-let turtle = { x: 0, y: 0, heading: 0 };
+const palettes = {
+  default: ["red", "blue", "lime", "yellow", "cyan", "magenta", "orange", "pink"],
+  warm: ["#ff4d4d", "#ff9248", "#ffd24d", "#ff6b8a", "#ff9fb5"],
+  cool: ["#4dd0ff", "#4d88ff", "#8a9bff", "#7ef5d4", "#b3b8ff"],
+  mono: ["#fff", "#ddd", "#aaa", "#888", "#666"],
+  random: []
+};
 
-function toScreen(x, y) {
-  return {
-    sx: canvas.width / 2 + x,
-    sy: canvas.height / 2 - y
-  };
-}
-
-function moveTo(nx, ny, draw) {
-  if (draw) {
-    const p1 = toScreen(turtle.x, turtle.y);
-    const p2 = toScreen(nx, ny);
-    ctx.beginPath();
-    ctx.moveTo(p1.sx, p1.sy);
-    ctx.lineTo(p2.sx, p2.sy);
-    ctx.stroke();
+function getPalette() {
+  if (paletteName === 'random') {
+    // generate random palette per frame
+    const arr = [];
+    for (let i = 0; i < 8; i++) arr.push(randomColor());
+    return arr;
   }
-  turtle.x = nx;
-  turtle.y = ny;
+  return palettes[paletteName] || palettes.default;
 }
 
-function forward(distance, draw) {
-  const rad = turtle.heading * Math.PI / 180;
-  const nx = turtle.x + distance * Math.cos(rad);
-  const ny = turtle.y + distance * Math.sin(rad);
-  moveTo(nx, ny, draw);
+function randomColor() {
+  const h = Math.floor(Math.random() * 360);
+  return `hsl(${h} 100% 60%)`;
 }
 
-function draw() {
-  ctx.fillStyle = "black";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+// High-DPI handling
+function resize() {
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  // CSS size (for layout)
+  const cssW = window.innerWidth;
+  const cssH = window.innerHeight;
+  // backing store size
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  // set CSS display size
+  canvas.style.width = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  // scale drawing operations to account for DPR
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Turtle-like state handled per spoke drawing
+function toScreen(x, y, cx, cy) {
+  return { sx: cx + x, sy: cy - y };
+}
+
+// Draw one frame
+function render(time) {
+  if (!running) return; // stop rendering if paused
+  requestAnimationFrame(render);
+
+  const t = time * 0.001 * speed; // seconds scaled by speed
+  const w = canvas.width / (window.devicePixelRatio || 1);
+  const h = canvas.height / (window.devicePixelRatio || 1);
+  const cx = w / 2;
+  const cy = h / 2;
+
+  // background
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
+
   ctx.lineWidth = 1;
 
-  for (let i = 0; i < 120; i++) {
-    // penup + goto(0, 40)
-    turtle.x = 0;
-    turtle.y = 40;
-    turtle.heading = 0;
+  const palette = getPalette();
 
-    const angle = i * (Math.PI * 2) / 120;
+  // rotate overall pattern slowly
+  const rotation = t * 0.3; // radians
+
+  const spokes = 120;
+  for (let i = 0; i < spokes; i++) {
+    // start point: (0,40) rotated by rotation
+    const startX = 0;
+    const startY = 40;
+
+    const angle = i * (Math.PI * 2) / spokes + rotation;
     const x = 16 * Math.pow(Math.sin(angle), 3) * 15;
     const y = (
       13 * Math.cos(angle)
@@ -88,22 +160,72 @@ function draw() {
       - Math.cos(4 * angle)
     ) * 15;
 
-    const c = colors[Math.floor(Math.random() * colors.length)];
-    ctx.strokeStyle = c;
+    // pick color deterministically so it's stable per spoke
+    const colorIndex = Math.floor((i + Math.floor(t*2)) % palette.length);
+    ctx.strokeStyle = palette[colorIndex];
 
-    // pendown, goto(x, y) -- draws the spoke line
-    moveTo(x, y, true);
+    // draw spoke from (0,40) to (x,y) but account for rotation of start point
+    // We'll rotate each point around origin by 'rotation'
+    const sinR = Math.sin(rotation);
+    const cosR = Math.cos(rotation);
+    const sx = startX * cosR - startY * sinR;
+    const sy = startX * sinR + startY * cosR;
+    const ex = x * cosR - y * sinR;
+    const ey = x * sinR + y * cosR;
 
-    // 8-point starburst: forward, backward, turn RIGHT 45, repeat
+    const p1 = toScreen(sx, sy, cx, cy);
+    const p2 = toScreen(ex, ey, cx, cy);
+
+    ctx.beginPath();
+    ctx.moveTo(p1.sx, p1.sy);
+    ctx.lineTo(p2.sx, p2.sy);
+    ctx.stroke();
+
+    // starburst at (ex, ey)
+    const starLen = starBase; // controlled by UI
+    // star rotates slightly over time
+    let starHeading = t * 60 + i * 7;
     for (let j = 0; j < 8; j++) {
-      forward(6, true);
-      forward(-6, true);
-      turtle.heading -= 45; // turtle's right() decreases heading
+      const rad = (starHeading + j * 45) * Math.PI / 180;
+      const nx = ex + Math.cos(rad) * starLen;
+      const ny = ey + Math.sin(rad) * starLen;
+      const ps = toScreen(ex, ey, cx, cy);
+      const pn = toScreen(nx, ny, cx, cy);
+      ctx.beginPath();
+      ctx.moveTo(ps.sx, ps.sy);
+      ctx.lineTo(pn.sx, pn.sy);
+      ctx.stroke();
     }
   }
 }
 
-draw();
+// Animation control
+let rafId = null;
+function start() {
+  if (!rafId) rafId = requestAnimationFrame(function loop(ts) { render(ts); rafId = null; if (running) start(); });
+}
+function stop() {
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+}
+
+// UI wiring
+toggleBtn.addEventListener('click', () => {
+  running = !running;
+  toggleBtn.textContent = running ? 'Pause' : 'Play';
+  if (running) start();
+});
+
+speedInput.addEventListener('input', (e) => { speed = parseFloat(e.target.value); });
+starLenInput.addEventListener('input', (e) => { starBase = parseFloat(e.target.value); });
+paletteSelect.addEventListener('change', (e) => { paletteName = e.target.value; });
+resetBtn.addEventListener('click', () => { speedInput.value = 1; starLenInput.value = 6; paletteSelect.value = 'default'; speed = 1; starBase = 6; paletteName = 'default'; });
+
+// Start rendering
+resize();
+start();
+
+// Accessibility: allow Space to toggle
+window.addEventListener('keydown', (e) => { if (e.code === 'Space') { e.preventDefault(); toggleBtn.click(); } });
 </script>
 </body>
 </html>
